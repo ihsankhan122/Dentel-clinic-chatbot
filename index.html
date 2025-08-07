@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dental Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        /* Additional CSS for stop button */
+        .stop-btn {
+            background-color: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-left: 10px;
+            font-size: 12px;
+            transition: opacity 0.3s;
+            opacity: 0; /* Initially hidden */
+        }
+        
+        .stop-btn.visible {
+            opacity: 1; /* Visible when this class is added */
+        }
+        
+        .stop-btn:hover {
+            background-color: #e60000;
+        }
+        
+        .bot-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .bot-controls .bubble {
+            flex: 1;
+        }
+        
+        /* Voice recognition button styles */
+        #micBtn {
+            background-color: #e0e0e0;
+            border: 1px solid #ccc;
+            color: #333;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        #micBtn:hover {
+            background-color: #d0d0d0;
+        }
+        
+        #micBtn.listening {
+            background-color: #ff4d4d;
+            color: white;
+        }
+        
+        #micBtn.listening:hover {
+            background-color: #e60000;
+        }
+        
+        /* Improved formatting for bot responses */
+        .bubble.bot {
+            white-space: pre-line; /* Preserve line breaks */
+        }
+        
+        .bubble.bot strong {
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+<div class="main-card">
+    <div class="header">
+        <h2>Dental Chatbot </h2>
+        <span class="status"><i class="fa fa-circle"></i> Online</span>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-container">
+        {% for category, message in messages %}
+          <div class="flash-message {{ category }}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+  
+    
+    <div style="display: flex; justify-content: flex-end; padding: 10px;">
+        <!-- Left side: CSV Upload (Hidden) -->
+        <form method="POST" enctype="multipart/form-data" action="/upload" class="upload-form" style="display: none; flex-direction: column; align-items: flex-start;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label for="fileUpload" class="custom-file-upload">📂 Choose CSV File</label>
+                <input type="file" name="file" id="fileUpload" required style="display:none;">
+                <button type="submit">Upload</button>
+            </div>
+            <span id="fileName" style="font-size: 12px; margin-top: 5px; color: #666;"></span>
+            <span style="font-size: 12px;font-weight: bold ; color: #666; margin-top: 5px;">Upload CSV file</span>
+        </form>
+        <!-- Right side: Clear & Speak Toggle -->
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button type="button" id="clearChatBtn" title="Clear Chat" style="
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                color: #333;
+                padding: 6px 12px;
+                font-size: 13px;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background 0.3s;
+            ">
+              <i class="fa fa-broom"></i>
+            </button>
+            
+            <button type="button" id="speakToggle" class="off" title="Toggle speak" style="
+                background-color: #e0e0e0;
+                border: 1px solid #ccc;
+                color: #333;
+                padding: 6px 12px;
+                font-size: 13px;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background 0.3s;
+            ">
+              🔇 OFF
+            </button>
+        </div>
+    </div>
+    
+    </form>
+    <div class="chat-box" id="chatHistory">
+        {% if history %}
+            {% for message, response in history %}
+                <div class="chat-entry user-msg">
+                    <div class="bubble user">{{ message }}</div>
+                </div>
+                <div class="chat-entry bot-msg">
+                    <div class="bot-controls">
+                        <div class="bubble bot">{{ response }}</div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="chat-entry bot-msg">
+                <div class="bot-controls">
+                    <div class="bubble bot">Hello! I'm ready to assist you. How can I help you today?</div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+    
+    <form id="chatForm" class="message-form">
+        <input type="text" id="messageInput" name="message" placeholder="Ask about Dental data ..." required>
+        <button type="submit" title="Send"><i class="fa fa-paper-plane"></i></button>
+        <button type="button" id="micBtn" title="Speak"><i class="fa fa-microphone"></i></button>
+    </form>
+</div>
+
+<script>
+const chatForm = document.getElementById("chatForm");
+const chatHistory = document.getElementById("chatHistory");
+const messageInput = document.getElementById("messageInput");
+const micBtn = document.getElementById("micBtn");
+const clearChatBtn = document.getElementById("clearChatBtn");
+const speakToggle = document.getElementById("speakToggle");
+let speakEnabled = true;  // speaking enabled by default
+let isListening = false;  // track if voice recognition is active
+
+// Toggle speak button click
+speakToggle.addEventListener("click", () => {
+    speakEnabled = !speakEnabled;
+    if (speakEnabled) {
+        speakToggle.textContent = "🔊 Speak: ON";
+        speakToggle.classList.remove("off");
+    } else {
+        speakToggle.textContent = "🔇 Speak: OFF";
+        speakToggle.classList.add("off");
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); // stop speaking if toggled off
+        }
+    }
+});
+
+chatForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const message = messageInput.value.trim();
+    if (!message) return;
+    
+    // Add user message
+    chatHistory.insertAdjacentHTML("beforeend", `
+        <div class="chat-entry user-msg">
+            <div class="bubble user"><strong>You:</strong> ${message}</div>
+        </div>
+    `);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    messageInput.value = "";
+    
+    // Show typing indicator without stop button initially
+    const typingElement = document.createElement("div");
+    typingElement.classList.add("chat-entry", "bot-msg", "typing-indicator");
+    typingElement.innerHTML = `
+        <div class="bot-controls">
+            <div class="bubble bot typing">
+                <strong>Bot:</strong> <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
+            <button class="stop-btn" title="Stop Execution">⏹</button>
+        </div>
+    `;
+    chatHistory.appendChild(typingElement);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    
+    // Get the stop button element
+    const stopBtn = typingElement.querySelector('.stop-btn');
+    
+    // Set a timer to show the stop button after 8 seconds
+    const stopButtonTimer = setTimeout(() => {
+        stopBtn.classList.add('visible');
+    }, 8000);
+    
+    // Handle stop button click
+    stopBtn.addEventListener("click", async () => {
+        // Send stop request to server
+        try {
+            const res = await fetch("/stop_execution", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"}
+            });
+            
+            if (res.ok) {
+                // Remove the typing indicator
+                typingElement.remove();
+                
+                // Add a message indicating execution was stopped
+                chatHistory.insertAdjacentHTML("beforeend", `
+                    <div class="chat-entry bot-msg">
+                        <div class="bot-controls">
+                            <div class="bubble bot">Request stopped by user.</div>
+                        </div>
+                    </div>
+                `);
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        } catch (error) {
+            console.error("Error stopping execution:", error);
+        }
+    });
+    
+    // Send message to server
+    try {
+        const res = await fetch("/ask", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ message })
+        });
+        
+        // Clear the stop button timer if the response comes back within 8 seconds
+        clearTimeout(stopButtonTimer);
+        
+        const data = await res.json();
+        
+        // Remove typing indicator
+        typingElement.remove();
+        
+        // Add bot response
+        chatHistory.insertAdjacentHTML("beforeend", `
+            <div class="chat-entry bot-msg">
+                <div class="bot-controls">
+                    <div class="bubble bot"><strong>Bot:</strong> ${data.response}</div>
+                </div>
+            </div>
+        `);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+        
+        // Speak bot response if enabled
+        if (speakEnabled && 'speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(data.response);
+            utterance.lang = 'en-US';
+            window.speechSynthesis.speak(utterance);
+        }
+    } catch (error) {
+        // Clear the stop button timer
+        clearTimeout(stopButtonTimer);
+        
+        // Remove typing indicator
+        typingElement.remove();
+        
+        // Add error message
+        chatHistory.insertAdjacentHTML("beforeend", `
+            <div class="chat-entry bot-msg">
+                <div class="bot-controls">
+                    <div class="bubble bot">Error: ${error.message}</div>
+                </div>
+            </div>
+        `);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+});
+// 🎤 Voice recognition
+if ('webkitSpeechRecognition' in window) {
+    const recognition = new webkitSpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.continuous = false; // Set to false to stop after first result
+    
+    micBtn.addEventListener("click", () => {
+        if (!isListening) {
+            // Start listening
+            recognition.start();
+            isListening = true;
+            micBtn.innerHTML = '<i class="fa fa-stop"></i>';
+            micBtn.classList.add('listening');
+            micBtn.title = "Stop Listening";
+        } else {
+            // Stop listening
+            recognition.stop();
+            resetMicButton();
+        }
+    });
+    
+    recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        messageInput.value = transcript;
+        resetMicButton();
+    };
+    
+    recognition.onerror = function(event) {
+        console.error("Speech recognition error", event.error);
+        resetMicButton();
+    };
+    
+    recognition.onend = function() {
+        resetMicButton();
+    };
+    
+    function resetMicButton() {
+        isListening = false;
+        micBtn.innerHTML = '<i class="fa fa-microphone"></i>';
+        micBtn.classList.remove('listening');
+        micBtn.title = "Speak";
+    }
+} else {
+    micBtn.disabled = true;
+    micBtn.title = "Voice not supported";
+}
+document.getElementById("fileUpload").addEventListener("change", function () {
+        const file = this.files[0];
+        const fileName = file ? file.name : "No file chosen";
+        document.getElementById("fileName").textContent = fileName;
+    });
+// Clear chat button logic
+clearChatBtn.addEventListener("click", async () => {
+    const res = await fetch("/clear_chat", { method: "POST" });
+    if (res.ok) {
+        chatHistory.innerHTML = `
+            <div class="chat-entry bot-msg">
+                <div class="bot-controls">
+                    <div class="bubble bot">Hello! I'm ready to assist you. How can I help you today?</div>
+                </div>
+            </div>
+        `;
+        messageInput.value = "";
+        messageInput.focus();
+    } else {
+        alert("Failed to clear chat history.");
+    }
+});
+</script>
+</body>
+</html>

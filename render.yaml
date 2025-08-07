@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: flask-chatbot
+    env: docker
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        value: AIzaSyChkF1u-5t7pFrR935llWgo_9kwgvbomHQ
